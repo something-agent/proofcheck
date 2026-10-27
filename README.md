@@ -56,6 +56,19 @@ npx wrangler deploy
 
 The tests sign with viem and with the official SDK and require ProofCheck to agree on digests and signers; `test/fixtures/` holds real 402 responses captured from live services (EIP-712 and did:web JWS) on 2026-10-27.
 
+## Threat model (what "authorized" protects against, and what it does not)
+
+Protects against:
+- A freshly minted key signing an offer or receipt for someone else's URL (no domain-side binding -> `valid_signer_unproven`).
+- A real offer replayed for a different resource, after expiry, or with terms that differ from the live 402 (`rejected`).
+- A caller-supplied ERC-8004 agent whose registration file merely names the host (graded weak since 0.1.1).
+
+Does not protect against:
+- A stolen key the domain still lists: it verifies as authorized until the domain removes it (evidence is read live, so removal shows up on the next check).
+- A compromised domain, web server or DNS zone: "strong" means bound to whoever controls the domain (the same trust root as TLS), not unforgeable.
+- Quote-time attribution: evidence is current state at `authorization.checked_at`. Verify at quote time and store the result beside the artifact.
+- Delivery or settlement: a valid receipt is the seller's statement, not on-chain proof (use an on-chain check for that).
+
 ## Known limits
 
 - Cloudflare does not let a Worker fetch another `*.workers.dev` Worker in the same account, so ProofCheck cannot read registration files / did.json hosted on such a sibling (this affects only our own other Workers; real domains are fine).
