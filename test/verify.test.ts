@@ -132,6 +132,27 @@ describe("signer authorization evidence", () => {
     const r = await verifyOffer({ format: "eip712", payload: p, signature: await signOffer(a, p) }, {}, ctx(f));
     expect(ev(r, "erc8004").result).toBe("not_found"); expect(r.verdict).toBe("valid_signer_unproven");
   });
+  it.each([
+    [false, "weak"],
+    [true, "strong"],
+  ])("ERC-8004 caller-supplied agent (domain lists it: %s) -> %s", async (domainLists, strength) => {
+    const a = newAccount(); const p = offerPayload();
+    const sel = (s: string) => bytesToHex(keccak_256(enc.encode(s)).slice(0, 4));
+    const pad = (addr: string) => "0x" + "0".repeat(24) + addr.slice(2).toLowerCase();
+    // attacker-style registration: the file names the victim host, but only the registrant wrote that
+    const uri = "data:application/json," + encodeURIComponent(JSON.stringify({ services: [{ endpoint: `https://${HOST}/` }] }));
+    const b = bytesToHex(enc.encode(uri));
+    const strEnc = "0x" + "20".padStart(64, "0") + (b.length / 2).toString(16).padStart(64, "0") + b.padEnd(Math.ceil(b.length / 64) * 64, "0");
+    const { f } = stubFetch([
+      (u) => (u === `https://${HOST}/.well-known/agent-registration.json` ? (domainLists ? json({ registrations: [{ agentId: 9, agentRegistry: `eip155:8453:${IDENTITY_REGISTRY}` }] }) : new Response("nf", { status: 404 })) : undefined),
+      async (u, init) => u.includes("mainnet.base.org") ? json(JSON.parse(String(init!.body)).map((c: any) => { const d = c.params[0].data; return { jsonrpc: "2.0", id: c.id, result: d.startsWith("0x" + sel("tokenURI(uint256)")) ? strEnc : pad(a.address) }; })) : undefined,
+    ]);
+    const r = await verifyOffer({ format: "eip712", payload: p, signature: await signOffer(a, p) }, { agent: { chainId: 8453, agentId: "9" } }, ctx(f));
+    expect(ev(r, "erc8004")).toMatchObject({ result: "authorized", strength });
+    expect(r.authorization.status).toBe(domainLists ? "authorized" : "weak_only");
+    expect(r.authorization.checked_at).toMatch(/^\d{4}-/);
+    expect(r.authorization.time_scope).toMatch(/not at issuance/);
+  });
   it("network errors become evidence errors, not exceptions", async () => {
     const a = newAccount(); const p = offerPayload();
     const f = (async () => { throw new Error("boom"); }) as unknown as typeof fetch;

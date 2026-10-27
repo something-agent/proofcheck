@@ -1,6 +1,6 @@
 {
   "name": "proofcheck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Free verifier for x402 signed offers and receipts, with signer-authorization evidence (payTo, did:web, DNS, ERC-8004). HTTP API + remote MCP server on Cloudflare Workers.",
   "type": "module",
   "scripts": {

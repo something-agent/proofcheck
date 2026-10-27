@@ -13,7 +13,7 @@ export interface Ctx { fetchImpl?: typeof fetch; now?: number; skipNetwork?: boo
 export interface ArtifactResult {
   kind: "offer" | "receipt"; format: string; verdict: Verdict; signature_valid: boolean;
   signer: { address?: string; kid?: string; key_type?: string } | null;
-  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[] };
+  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[]; checked_at?: string; time_scope?: string };
   summary: string;
 }
 
@@ -78,7 +78,8 @@ async function authorize(signer: Signer, host: string | null, o: { payTo?: strin
   let p: Promise<Evidence[]>;
   if (ctx.cache) { p = ctx.cache.get(key) ?? run(); ctx.cache.set(key, p); } else p = run();
   const evidence = await p;
-  return { status: summarize(evidence), host, evidence };
+  return { status: summarize(evidence), host, evidence, checked_at: new Date(now(ctx) * 1000).toISOString(),
+    time_scope: "current state at checked_at, not at issuance: DID/DNS/registration may have changed since the artifact was signed. Store this result (and checked_at) beside the artifact if you need quote-time attribution." };
 }
 
 function verdictOf(sigOk: boolean, checks: Check[], auth: ArtifactResult["authorization"]): Verdict {

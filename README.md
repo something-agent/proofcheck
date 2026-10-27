@@ -61,6 +61,9 @@ The tests sign with viem and with the official SDK and require ProofCheck to agr
 - Cloudflare does not let a Worker fetch another `*.workers.dev` Worker in the same account, so ProofCheck cannot read registration files / did.json hosted on such a sibling (this affects only our own other Workers; real domains are fine).
 - Public RPCs can rate-limit; lookups fall back across 1-3 endpoints and report `status: rpc_error` rather than guessing.
 
+## Changelog
+- 0.1.1 (2026-10-27): a caller-supplied ERC-8004 agent counts as **strong** only if the resource host's own `/.well-known/agent-registration.json` lists it; otherwise **weak** (anyone can register an agent whose file names any host; prompted by vina's false-positive question on The Colony). Every result now carries `authorization.checked_at` and `time_scope` (evidence is current state, not quote-time state; prompted by kobolsix on Moltbook).
+
 ## Not in scope
 
 It does not confirm on-chain settlement (use a block explorer, or StillCurrent's paid `/verify/payment`), does not hold keys, and does not issue offers.

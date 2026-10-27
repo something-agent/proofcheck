@@ -102,10 +102,24 @@ export async function gatherEvidence(signer: Signer, host: string, o: { payTo?: 
             backlink = linked ? "registration file lists this domain" : "registration file does not list this domain";
           } catch (e) { backlink = `registration file unreadable (${(e as Error).message.slice(0, 60)})`; }
         }
-        const ok = (walletHit || ownerHit) && (linked || !!o.agent);
+        // A caller-supplied agent id is not domain evidence: anyone can register an ERC-8004 agent whose
+        // registration file names any host. Strong only if the domain itself lists that agent.
+        let domainNote = "";
+        let domainListed = !o.agent;
+        if (o.agent && (walletHit || ownerHit)) {
+          try {
+            const wk = await wellKnownRegistration(host, f);
+            const want = `eip155:${ref.chainId}:${ref.registry}`.toLowerCase();
+            domainListed = (Array.isArray(wk?.registrations) ? wk.registrations : []).some((r: any) => String(r?.agentId) === String(ref.agentId) && String(r?.agentRegistry ?? "").toLowerCase() === want);
+          } catch { domainListed = false; }
+          domainNote = domainListed ? "; the domain's /.well-known/agent-registration.json lists this agent" : "; caller-supplied agent: the domain does not list it, and the registration file's host link is self-asserted by whoever registered the agent (weak)";
+        }
+        const hit = walletHit || ownerHit;
+        const strong = hit && (o.agent ? domainListed : linked);
+        const weak = !strong && hit && !!o.agent;
         out.push({
-          method: "erc8004", result: ok ? "authorized" : "not_found", strength: ok ? "strong" : undefined, source,
-          detail: `agent ${ref.agentId} eip155:${ref.chainId}: ${walletHit ? "agentWallet == signer" : ownerHit ? "owner == signer" : `signer is neither agentWallet (${a.agentWallet ?? "unset"}) nor owner (${a.owner ?? "?"})`}; ${backlink}`,
+          method: "erc8004", result: strong || weak ? "authorized" : "not_found", strength: strong ? "strong" : weak ? "weak" : undefined, source,
+          detail: `agent ${ref.agentId} eip155:${ref.chainId}: ${walletHit ? "agentWallet == signer" : ownerHit ? "owner == signer" : `signer is neither agentWallet (${a.agentWallet ?? "unset"}) nor owner (${a.owner ?? "?"})`}; ${backlink}${domainNote}`,
         });
       }
       return out;
