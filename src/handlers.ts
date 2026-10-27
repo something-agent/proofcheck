@@ -76,7 +76,11 @@ export const handlers = {
         }
       } catch (e) { notes.push(`registration file not loadable: ${(e as Error).message.slice(0, 120)}`); }
     } else if (out.exists) notes.push("agent exists but tokenURI is empty/unreadable");
-    if (!out.exists) notes.push("no such agent id on this registry/chain");
+    if (!out.exists) {
+      const rpcDown = on.errors.length >= 3 && on.errors.every((e) => /rpc http|rpc|fetch|timeout|abort|network/i.test(e) && !/revert|execution|nonexistent|invalid token/i.test(e));
+      if (rpcDown) { out.status = "rpc_error"; notes.push("could not read the chain (public RPCs unavailable or rate-limited); result is unknown, retry later"); }
+      else notes.push("no such agent id on this registry/chain");
+    }
     out.notes = notes;
     return out;
   },

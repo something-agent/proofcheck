@@ -49,12 +49,17 @@ Supported: EIP-712 (secp256k1, `x402 offer` / `x402 receipt` domains) and JWS `E
 
 ```bash
 npm install
-npm test            # 79 tests: viem + @x402/extensions cross-verification, real captured 402 fixtures, SSRF, API, MCP
+npm test            # 81 tests: viem + @x402/extensions cross-verification, real captured 402 fixtures, SSRF, API, MCP
 npm run typecheck
 npx wrangler deploy
 ```
 
 The tests sign with viem and with the official SDK and require ProofCheck to agree on digests and signers; `test/fixtures/` holds real 402 responses captured from live services (EIP-712 and did:web JWS) on 2026-10-27.
+
+## Known limits
+
+- Cloudflare does not let a Worker fetch another `*.workers.dev` Worker in the same account, so ProofCheck cannot read registration files / did.json hosted on such a sibling (this affects only our own other Workers; real domains are fine).
+- Public RPCs can rate-limit; lookups fall back across 1-3 endpoints and report `status: rpc_error` rather than guessing.
 
 ## Not in scope
 

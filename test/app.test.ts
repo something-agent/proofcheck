@@ -117,3 +117,19 @@ describe("MCP", () => {
     expect((await app.request(B + "/mcp")).status).toBe(405);
   });
 });
+
+describe("ERC-8004 lookup", () => {
+  it("falls back across RPCs on 429 and reports rpc_error honestly when all fail", async () => {
+    const down = mk([(u: string) => (u.includes("rpc") || u.includes("drpc") || u.includes("base.org") ? new Response("", { status: 429 }) : undefined)]);
+    const j: any = await (await down.app.request(B + "/v1/erc8004/agent?chain_id=8453&agent_id=1", { headers: { "cf-connecting-ip": "10.0.0.1" } })).json();
+    expect(j.status).toBe("rpc_error"); expect(j.exists).toBe(false);
+    expect(down.calls.filter((c) => c.includes("publicnode") || c.includes("drpc") || c.includes("base.org")).length).toBe(3);
+  });
+  it("reads an agent via one batched call", async () => {
+    const pad = (a: string) => "0x" + "0".repeat(24) + a.slice(2);
+    const owner = "0x" + "ab".repeat(20);
+    const m = mk([async (u: string, init: any) => (u.includes("publicnode") ? json(JSON.parse(String(init.body)).map((c: any, i: number) => (i === 0 ? { jsonrpc: "2.0", id: c.id, result: pad(owner) } : { jsonrpc: "2.0", id: c.id, error: { message: "execution reverted" } }))) : undefined)]);
+    const j: any = await (await m.app.request(B + "/v1/erc8004/agent?chain_id=8453&agent_id=42", { headers: { "cf-connecting-ip": "10.0.0.2" } })).json();
+    expect(j.exists).toBe(true); expect(j.owner).toBe(owner); expect(m.calls.length).toBe(1);
+  });
+});

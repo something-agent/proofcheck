@@ -8,16 +8,16 @@ export const IDENTITY_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
 
 export const CHAIN_RPCS: Record<number, string[]> = {
   1: ["https://ethereum-rpc.publicnode.com"],
-  8453: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
-  10: ["https://mainnet.optimism.io"],
-  42161: ["https://arb1.arbitrum.io/rpc"],
+  8453: ["https://base-rpc.publicnode.com", "https://base.drpc.org", "https://mainnet.base.org"],
+  10: ["https://optimism-rpc.publicnode.com", "https://optimism.drpc.org", "https://mainnet.optimism.io"],
+  42161: ["https://arbitrum-one-rpc.publicnode.com", "https://arbitrum.drpc.org", "https://arb1.arbitrum.io/rpc"],
   137: ["https://polygon-bor-rpc.publicnode.com"],
   56: ["https://bsc-rpc.publicnode.com"],
-  43114: ["https://api.avax.network/ext/bc/C/rpc"],
-  100: ["https://rpc.gnosischain.com"],
-  42220: ["https://forno.celo.org"],
-  59144: ["https://rpc.linea.build"],
-  534352: ["https://rpc.scroll.io"],
+  43114: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"],
+  100: ["https://gnosis-rpc.publicnode.com", "https://rpc.gnosischain.com"],
+  42220: ["https://celo-rpc.publicnode.com", "https://forno.celo.org"],
+  59144: ["https://linea-rpc.publicnode.com", "https://rpc.linea.build"],
+  534352: ["https://scroll-rpc.publicnode.com", "https://rpc.scroll.io"],
 };
 
 const sel = (sig: string) => bytesToHex(keccak_256(enc.encode(sig)).slice(0, 4));
