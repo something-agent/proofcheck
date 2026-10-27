@@ -1,0 +1,9 @@
+# ProofCheck on Cloudflare Workers Free. Served at https://proofcheck.<subdomain>.workers.dev
+name = "proofcheck"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true

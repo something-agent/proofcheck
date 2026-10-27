@@ -1,0 +1,124 @@
+/**
+ * Signer-authorization evidence. A valid signature only proves *someone* holds the key; the spec (§4.5.1) requires
+ * evidence the key is bound to the service. Evidence is graded:
+ *   strong - bound to control of the resource's domain, or to the payTo the resource itself returned over TLS
+ *   weak   - self-asserted inside the artifact being checked (e.g. offer.payTo == signer, with no independent payTo)
+ * Mutable sources (DID docs, DNS) show *current* state only - reported as such.
+ */
+import { lc } from "./bytes";
+import { dnsControllers, didWebUrl, fetchDidWeb, keysFromVerificationMethod, wellKnownRegistration } from "./did";
+import { IDENTITY_REGISTRY, loadRegistration, readAgent } from "./chain";
+import { PubKey, pubKeyFromJwk, pubKeyFromMultibase } from "./jws";
+import { dec, b64urlDecode } from "./bytes";
+
+export interface Signer { evm?: string; pub?: PubKey }
+export interface Evidence { method: string; result: "authorized" | "not_found" | "error" | "skipped"; strength?: "strong" | "weak"; detail: string; source?: string }
+export interface AuthCtx { fetchImpl?: typeof fetch; network?: boolean }
+
+export function sameKey(candidate: PubKey, s: Signer): boolean {
+  if (s.evm && candidate.evmAddress) return lc(s.evm) === lc(candidate.evmAddress);
+  if (s.pub && candidate.bytes.length && s.pub.kind === candidate.kind) return s.pub.bytes.length === candidate.bytes.length && s.pub.bytes.every((b, i) => b === candidate.bytes[i]);
+  return false;
+}
+
+const err = (method: string, e: unknown, source?: string): Evidence => ({ method, result: "error", detail: String((e as Error)?.message ?? e).slice(0, 200), source });
+
+export function describeSigner(s: Signer): string { return s.evm ?? (s.pub ? `${s.pub.kind}:${s.pub.bytes.length} bytes` : "unknown"); }
+
+export async function gatherEvidence(signer: Signer, host: string, o: { payTo?: string; trustedPayTo?: string[]; agent?: { chainId: number; agentId: string; registry?: string }; skipNetwork?: boolean }, ctx: AuthCtx): Promise<Evidence[]> {
+  const ev: Evidence[] = [];
+
+  // 1. payTo
+  if (signer.evm) {
+    if (o.trustedPayTo?.some((p) => lc(p) === lc(signer.evm!))) ev.push({ method: "payTo", result: "authorized", strength: "strong", detail: "signer equals a payTo returned by the resource's own live 402 response (TLS to the resource host). Note: spec recommends a dedicated signing key rather than the payTo key." });
+    else if (o.payTo && lc(o.payTo) === lc(signer.evm)) ev.push({ method: "payTo", result: "authorized", strength: "weak", detail: "signer equals the payTo inside the artifact itself - self-asserted; anyone can sign an offer naming their own address. Becomes strong only if payTo is independently confirmed (live 402 or trusted_pay_to)." });
+    else ev.push({ method: "payTo", result: "not_found", detail: "signer is not a known payTo for this resource" });
+  } else ev.push({ method: "payTo", result: "skipped", detail: "signer is not an EVM key" });
+
+  if (o.skipNetwork) return ev;
+  const f = ctx.fetchImpl;
+
+  const tasks: Promise<Evidence[]>[] = [];
+
+  // 2. did:web at the resource host
+  tasks.push((async () => {
+    const did = `did:web:${host}`;
+    try {
+      const { doc, url } = await fetchDidWeb(did, f);
+      const keys = (doc.verificationMethod ?? []).flatMap(keysFromVerificationMethod);
+      const hit = keys.some((k) => sameKey(k, signer));
+      return [{ method: "did_web", result: hit ? "authorized" : "not_found", strength: hit ? "strong" : undefined, detail: hit ? `key listed in ${did} verificationMethod (current state)` : `${keys.length} key(s) in ${did} document, none match the signer`, source: url } as Evidence];
+    } catch (e) { return [{ ...err("did_web", e, didSafeUrl(host)), result: /HTTP 404|HTTP 403/.test(String((e as Error).message)) ? "not_found" : "error" } as Evidence]; }
+  })());
+
+  // 3. DNS _controllers TXT (DoH)
+  tasks.push((async () => {
+    try {
+      const { controllers, dnssec } = await dnsControllers(host, f);
+      if (!controllers.length) return [{ method: "dns_controllers", result: "not_found", detail: `no _controllers.${host} TXT records` } as Evidence];
+      let hit = false;
+      for (const c of controllers) {
+        const m = c.match(/^did:pkh:eip155:\d+:(0x[0-9a-fA-F]{40})$/);
+        if (m && signer.evm && lc(m[1]) === lc(signer.evm)) hit = true;
+        try {
+          if (c.startsWith("did:key:")) hit = hit || sameKey(pubKeyFromMultibase(c.slice(8)), signer);
+          if (c.startsWith("did:jwk:")) hit = hit || sameKey(pubKeyFromJwk(JSON.parse(dec.decode(b64urlDecode(c.slice(8))))), signer);
+        } catch { /* ignore malformed controller */ }
+      }
+      return [{ method: "dns_controllers", result: hit ? "authorized" : "not_found", strength: hit ? "strong" : undefined, detail: hit ? `signer listed in _controllers.${host} TXT${dnssec ? " (resolver reports DNSSEC-validated)" : " (resolver did NOT report DNSSEC validation)"}` : `${controllers.length} controller(s) published, none match the signer`, source: `dns:_controllers.${host}` } as Evidence];
+    } catch (e) { return [err("dns_controllers", e)]; }
+  })());
+
+  // 4. ERC-8004 via domain's /.well-known/agent-registration.json, or an explicit agent
+  tasks.push((async () => {
+    if (!signer.evm) return [{ method: "erc8004", result: "skipped", detail: "signer is not an EVM key" } as Evidence];
+    try {
+      let refs: { chainId: number; agentId: string; registry: string }[] = [];
+      let source: string | undefined;
+      if (o.agent) refs = [{ chainId: o.agent.chainId, agentId: o.agent.agentId, registry: o.agent.registry ?? IDENTITY_REGISTRY }];
+      else {
+        const wk = await wellKnownRegistration(host, f);
+        source = `https://${host}/.well-known/agent-registration.json`;
+        for (const r of (Array.isArray(wk.registrations) ? wk.registrations : []).slice(0, 2)) {
+          const m = String(r?.agentRegistry ?? "").match(/^eip155:(\d+):(0x[0-9a-fA-F]{40})$/);
+          if (m && r.agentId !== undefined) refs.push({ chainId: Number(m[1]), agentId: String(r.agentId), registry: m[2] });
+        }
+        if (!refs.length) return [{ method: "erc8004", result: "not_found", detail: "agent-registration.json present but lists no usable registrations", source } as Evidence];
+      }
+      const out: Evidence[] = [];
+      for (const ref of refs.slice(0, 1)) {
+        const a = await readAgent(ref.chainId, ref.agentId, { registry: ref.registry, fetchImpl: f });
+        if (!a.owner && !a.agentWallet) { out.push({ method: "erc8004", result: "not_found", detail: `agent ${ref.agentId} on eip155:${ref.chainId} not found (${a.errors[0] ?? "no owner"})`, source }); continue; }
+        const walletHit = a.agentWallet && lc(a.agentWallet) === lc(signer.evm);
+        const ownerHit = a.owner && lc(a.owner) === lc(signer.evm);
+        // Bidirectional check: the on-chain registration file must reference the host (domain verification, per ERC-8004).
+        let backlink = "not checked";
+        let linked = !!o.agent; // for explicit agent, the caller claimed the link; we report backlink but don't require it
+        if (a.agentURI && (walletHit || ownerHit)) {
+          try {
+            const reg = await loadRegistration(a.agentURI, f);
+            const urls = JSON.stringify(reg?.services ?? reg?.endpoints ?? []);
+            linked = urls.toLowerCase().includes(host.toLowerCase());
+            backlink = linked ? "registration file lists this domain" : "registration file does not list this domain";
+          } catch (e) { backlink = `registration file unreadable (${(e as Error).message.slice(0, 60)})`; }
+        }
+        const ok = (walletHit || ownerHit) && (linked || !!o.agent);
+        out.push({
+          method: "erc8004", result: ok ? "authorized" : "not_found", strength: ok ? "strong" : undefined, source,
+          detail: `agent ${ref.agentId} eip155:${ref.chainId}: ${walletHit ? "agentWallet == signer" : ownerHit ? "owner == signer" : `signer is neither agentWallet (${a.agentWallet ?? "unset"}) nor owner (${a.owner ?? "?"})`}; ${backlink}`,
+        });
+      }
+      return out;
+    } catch (e) { return [{ ...err("erc8004", e), result: /HTTP 404/.test(String((e as Error).message)) ? "not_found" : "error" } as Evidence]; }
+  })());
+
+  for (const r of await Promise.all(tasks)) ev.push(...r);
+  return ev;
+}
+function didSafeUrl(host: string): string { try { return didWebUrl(`did:web:${host}`).url; } catch { return host; } }
+
+export function summarize(ev: Evidence[]): "authorized" | "weak_only" | "unproven" {
+  if (ev.some((e) => e.result === "authorized" && e.strength === "strong")) return "authorized";
+  if (ev.some((e) => e.result === "authorized")) return "weak_only";
+  return "unproven";
+}
