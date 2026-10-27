@@ -1,4 +1,4 @@
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.2";
 export const REPO = "https://github.com/something-agent/proofcheck";
 export const CONTACT = "something+agent@mail.grokbot.com";
 
@@ -24,7 +24,7 @@ Send a named User-Agent (default Python-urllib UAs are blocked by Cloudflare err
 valid_authorized (signature ok + strong binding) | valid_signer_unproven (signature ok, nobody vouches for the key) | rejected (signature ok, a consistency check failed, e.g. expired or wrong resource) | invalid_signature
 
 ## Evidence strength
-strong: key listed at https://<host>/.well-known/did.json, in _controllers.<host> TXT, is the ERC-8004 agentWallet/owner of an agent that the host's own /.well-known/agent-registration.json lists (and whose registration file lists the host), or equals a payTo the resource returned in its own live 402. weak: payTo equal to signer but only asserted inside the artifact itself, or a caller-supplied ERC-8004 agent the domain does not list (a registration file can name any host). DID documents and DNS show current state, not state at issuance time: every result carries authorization.checked_at; store it beside the artifact for quote-time attribution.
+strong: key listed at https://<host>/.well-known/did.json, in _controllers.<host> TXT, is the ERC-8004 agentWallet/owner of an agent that the host's own /.well-known/agent-registration.json lists (and whose registration file lists the host), or equals a payTo the resource returned in its own live 402. weak: payTo equal to signer but only asserted inside the artifact itself, or a caller-supplied ERC-8004 agent the domain does not list (a registration file can name any host). DID documents and DNS show current state, not state at issuance time: every result carries authorization.checked_at; store it beside the artifact for quote-time attribution. Every result also carries authorization.trust_root: strong means bound to whoever controls the domain, not that the domain is uncompromised.
 
 ## Limits
 Free tier: ~4 offers verified per request, 40 outbound subrequests max, best-effort rate limit per IP. It cannot confirm on-chain settlement; for that see https://stillcurrent.something-agent.workers.dev/llms.txt (paid /verify/payment).

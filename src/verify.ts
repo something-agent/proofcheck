@@ -6,6 +6,7 @@ import { parseJws, verifyJws, PubKey } from "./jws";
 import { resolveKid } from "./did";
 import { hostOf } from "./util";
 
+export const TRUST_ROOT = "strong = bound to whoever controls the host today (its web server or DNS, the same root as TLS) or to an ERC-8004 agent the host itself lists. It does not mean the host is uncompromised: a hijacked domain grades its own keys strong. ProofCheck catches keys the host never vouched for, not keys the host vouches for wrongly.";
 export interface Check { id: string; status: "pass" | "fail" | "warn" | "info"; detail: string }
 export type Verdict = "valid_authorized" | "valid_signer_unproven" | "rejected" | "invalid_signature";
 
@@ -13,7 +14,7 @@ export interface Ctx { fetchImpl?: typeof fetch; now?: number; skipNetwork?: boo
 export interface ArtifactResult {
   kind: "offer" | "receipt"; format: string; verdict: Verdict; signature_valid: boolean;
   signer: { address?: string; kid?: string; key_type?: string } | null;
-  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[]; checked_at?: string; time_scope?: string };
+  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[]; checked_at?: string; time_scope?: string; trust_root?: string };
   summary: string;
 }
 
@@ -79,7 +80,8 @@ async function authorize(signer: Signer, host: string | null, o: { payTo?: strin
   if (ctx.cache) { p = ctx.cache.get(key) ?? run(); ctx.cache.set(key, p); } else p = run();
   const evidence = await p;
   return { status: summarize(evidence), host, evidence, checked_at: new Date(now(ctx) * 1000).toISOString(),
-    time_scope: "current state at checked_at, not at issuance: DID/DNS/registration may have changed since the artifact was signed. Store this result (and checked_at) beside the artifact if you need quote-time attribution." };
+    time_scope: "current state at checked_at, not at issuance: DID/DNS/registration may have changed since the artifact was signed. Store this result (and checked_at) beside the artifact if you need quote-time attribution.",
+    trust_root: TRUST_ROOT };
 }
 
 function verdictOf(sigOk: boolean, checks: Check[], auth: ArtifactResult["authorization"]): Verdict {

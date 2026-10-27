@@ -152,6 +152,7 @@ describe("signer authorization evidence", () => {
     expect(r.authorization.status).toBe(domainLists ? "authorized" : "weak_only");
     expect(r.authorization.checked_at).toMatch(/^\d{4}-/);
     expect(r.authorization.time_scope).toMatch(/not at issuance/);
+    expect(r.authorization.trust_root).toMatch(/not that the host is uncompromised|does not mean the host is uncompromised/);
   });
   it("network errors become evidence errors, not exceptions", async () => {
     const a = newAccount(); const p = offerPayload();
