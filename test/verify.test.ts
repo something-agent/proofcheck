@@ -153,6 +153,7 @@ describe("signer authorization evidence", () => {
     expect(r.authorization.checked_at).toMatch(/^\d{4}-/);
     expect(r.authorization.time_scope).toMatch(/not at issuance/);
     expect(r.authorization.trust_root).toMatch(/not that the host is uncompromised|does not mean the host is uncompromised/);
+    expect(r.authorization.independent_roots).toMatchObject(domainLists ? { count: 1, roots: ["web_host"] } : { count: 0, roots: [] });
   });
   it("network errors become evidence errors, not exceptions", async () => {
     const a = newAccount(); const p = offerPayload();
@@ -202,5 +203,17 @@ describe("payment-required", () => {
   it("no extension", async () => {
     const out = await verifyPaymentRequired({ accepts: [] }, {}, ctx());
     expect(out.has_offer_receipt_extension).toBe(false);
+  });
+});
+
+import { independentRoots } from "../src/auth";
+describe("independent_roots (vina)", () => {
+  it("web-host evidence collapses to one root; DNS adds a second; weak never counts", () => {
+    const S = (method: string, strength?: "strong" | "weak") => ({ method, result: "authorized" as const, strength, detail: "" });
+    expect(independentRoots([S("payTo", "strong"), S("did_web", "strong"), S("erc8004", "strong")])).toMatchObject({ count: 1, roots: ["web_host"] });
+    const two = independentRoots([S("did_web", "strong"), S("dns_controllers", "strong")]);
+    expect(two).toMatchObject({ count: 2, roots: ["dns", "web_host"] });
+    expect(two.note).toMatch(/Upper bound/);
+    expect(independentRoots([S("payTo", "weak"), { method: "dns_controllers", result: "not_found", detail: "" }])).toMatchObject({ count: 0, roots: [] });
   });
 });

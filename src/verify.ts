@@ -1,6 +1,6 @@
 /** Verification of x402 offer-receipt artifacts (EIP-712 and JWS) with graded signer-authorization evidence. */
 import { isAddress, lc } from "./bytes";
-import { Evidence, Signer, gatherEvidence, sameKey, summarize } from "./auth";
+import { Evidence, Signer, gatherEvidence, sameKey, summarize, independentRoots } from "./auth";
 import { offerDigest, receiptDigest, recoverSigner, OfferPayload, ReceiptPayload } from "./eip712";
 import { parseJws, verifyJws, PubKey } from "./jws";
 import { resolveKid } from "./did";
@@ -14,7 +14,7 @@ export interface Ctx { fetchImpl?: typeof fetch; now?: number; skipNetwork?: boo
 export interface ArtifactResult {
   kind: "offer" | "receipt"; format: string; verdict: Verdict; signature_valid: boolean;
   signer: { address?: string; kid?: string; key_type?: string } | null;
-  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[]; checked_at?: string; time_scope?: string; trust_root?: string };
+  payload: unknown; checks: Check[]; authorization: { status: "authorized" | "weak_only" | "unproven"; host: string | null; evidence: Evidence[]; checked_at?: string; time_scope?: string; trust_root?: string; independent_roots?: { count: number; roots: string[]; note: string } };
   summary: string;
 }
 
@@ -81,7 +81,7 @@ async function authorize(signer: Signer, host: string | null, o: { payTo?: strin
   const evidence = await p;
   return { status: summarize(evidence), host, evidence, checked_at: new Date(now(ctx) * 1000).toISOString(),
     time_scope: "current state at checked_at, not at issuance: DID/DNS/registration may have changed since the artifact was signed. Store this result (and checked_at) beside the artifact if you need quote-time attribution.",
-    trust_root: TRUST_ROOT };
+    trust_root: TRUST_ROOT, independent_roots: independentRoots(evidence) };
 }
 
 function verdictOf(sigOk: boolean, checks: Check[], auth: ArtifactResult["authorization"]): Verdict {

@@ -136,3 +136,22 @@ export function summarize(ev: Evidence[]): "authorized" | "weak_only" | "unprove
   if (ev.some((e) => e.result === "authorized")) return "weak_only";
   return "unproven";
 }
+
+/**
+ * Count of distinct trust roots behind the STRONG evidence (vina, The Colony 2026-10-27).
+ * web_host: live payTo, did:web, and a domain-listed ERC-8004 agent all depend on the web server
+ * (a hijacker of the web host can register a fresh ERC-8004 agent and list it).
+ * dns: _controllers TXT depends on the DNS zone, which can sit at a different provider than the web host.
+ * ProofCheck cannot see whether DNS and web share a provider/account, so count is an upper bound on independence.
+ */
+export interface IndependentRoots { count: number; roots: string[]; note: string }
+const ROOT_OF: Record<string, string> = { payTo: "web_host", did_web: "web_host", erc8004: "web_host", dns_controllers: "dns" };
+export function independentRoots(ev: Evidence[]): IndependentRoots {
+  const roots = [...new Set(ev.filter((e) => e.result === "authorized" && e.strength === "strong").map((e) => ROOT_OF[e.method] ?? e.method))].sort();
+  const note = roots.length >= 2
+    ? "strong evidence from 2 roots (web host and DNS zone): a web-server compromise alone does not flip both. Upper bound: if one account controls both, they fail together."
+    : roots.length === 1
+      ? `all strong evidence rests on one root (${roots[0]}); compromise of that root alone can forge it. For high-value use, require a second root (e.g. publish the key in _controllers.<host> TXT at your DNS provider) or a stored earlier snapshot.`
+      : "no strong evidence, so no trust root.";
+  return { count: roots.length, roots, note };
+}
