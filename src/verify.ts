@@ -1,6 +1,6 @@
 /** Verification of x402 offer-receipt artifacts (EIP-712 and JWS) with graded signer-authorization evidence. */
 import { isAddress, lc } from "./bytes";
-import { Evidence, Signer, gatherEvidence, sameKey, summarize, independentRoots } from "./auth";
+import { Evidence, applyRevocation, Signer, gatherEvidence, sameKey, summarize, independentRoots } from "./auth";
 import { offerDigest, receiptDigest, recoverSigner, OfferPayload, ReceiptPayload } from "./eip712";
 import { parseJws, verifyJws, PubKey } from "./jws";
 import { resolveKid } from "./did";
@@ -63,15 +63,16 @@ async function checkSignature(kind: "offer" | "receipt", art: RawArtifact, ctx: 
   return { ok: false, payload: null, signer: null, ident: null, checks: [fail("format", `unknown format '${String(format)}' (expected eip712 or jws)`)] };
 }
 
-async function authorize(signer: Signer, host: string | null, o: { payTo?: string; trustedPayTo?: string[]; agent?: any; kidDomain?: string; kidMethod?: string }, ctx: Ctx): Promise<ArtifactResult["authorization"]> {
+async function authorize(signer: Signer, host: string | null, o: { payTo?: string; trustedPayTo?: string[]; agent?: any; kidDomain?: string; kidMethod?: string; signedAt?: number }, ctx: Ctx): Promise<ArtifactResult["authorization"]> {
   if (!host) return { status: "unproven", host: null, evidence: [{ method: "host", result: "error", detail: "resourceUrl has no usable host" }] };
-  const key = JSON.stringify([signer.evm?.toLowerCase(), signer.pub ? Array.from(signer.pub.bytes).join(",") : "", host, o.trustedPayTo, o.agent]);
+  const key = JSON.stringify([signer.evm?.toLowerCase(), signer.pub ? Array.from(signer.pub.bytes).join(",") : "", host, o.trustedPayTo, o.agent, o.signedAt]);
   const run = async (): Promise<Evidence[]> => {
-    const ev = await gatherEvidence(signer, host, { payTo: o.payTo, trustedPayTo: o.trustedPayTo, agent: o.agent, skipNetwork: ctx.skipNetwork }, ctx);
+    const ev = await gatherEvidence(signer, host, { payTo: o.payTo, trustedPayTo: o.trustedPayTo, agent: o.agent, skipNetwork: ctx.skipNetwork, signedAt: o.signedAt }, ctx);
     if (o.kidMethod === "did:web" && o.kidDomain) {
       const bound = o.kidDomain === host;
       const i = ev.findIndex((e) => e.method === "did_web");
-      const e: Evidence = { method: "did_web", result: bound ? "authorized" : "not_found", strength: bound ? "strong" : undefined, detail: bound ? `kid resolved from https://${o.kidDomain} (the resource's own domain)` : `kid resolves on ${o.kidDomain}, which is not the resource host ${host}`, source: `did:web:${o.kidDomain}` };
+      const e0: Evidence = { method: "did_web", result: bound ? "authorized" : "not_found", strength: bound ? "strong" : undefined, detail: bound ? `kid resolved from https://${o.kidDomain} (the resource's own domain)` : `kid resolves on ${o.kidDomain}, which is not the resource host ${host}`, source: `did:web:${o.kidDomain}` };
+      const e = applyRevocation(e0, signer.pub?.revoked, o.signedAt);
       if (i >= 0) ev[i] = bound || ev[i].result !== "authorized" ? e : ev[i]; else ev.push(e);
     }
     return ev;
@@ -124,7 +125,7 @@ export async function verifyOffer(art: RawArtifact, o: OfferOpts, ctx: Ctx): Pro
   let authz: ArtifactResult["authorization"] = { status: "unproven", host, evidence: [] };
   if (s.ok && s.signer) {
     const trusted = [...(o.trustedPayTo ?? []), ...(Array.isArray(o.accepts) ? o.accepts.map((a: any) => a?.payTo).filter(isAddress) : [])];
-    authz = await authorize(s.signer, host, { payTo: isAddress(p.payTo) ? p.payTo : undefined, trustedPayTo: trusted.length ? trusted : undefined, agent: o.agent, kidDomain: s.kidDomain, kidMethod: s.kidMethod }, ctx);
+    authz = await authorize(s.signer, host, { payTo: isAddress(p.payTo) ? p.payTo : undefined, trustedPayTo: trusted.length ? trusted : undefined, agent: o.agent, kidDomain: s.kidDomain, kidMethod: s.kidMethod, signedAt: Number.isFinite(Number(p.issuedAt)) && p.issuedAt !== undefined ? Number(p.issuedAt) : undefined }, ctx);
     if (o.accepts && !o.trustedPayTo) checks.push(info("payTo_trust", "payTo was taken from the accepts[] you supplied; strong only if those came from the resource's live 402"));
   }
   const verdict = verdictOf(s.ok, checks, authz);
@@ -156,7 +157,7 @@ export async function verifyReceipt(art: RawArtifact, o: ReceiptOpts, ctx: Ctx):
     else checks.push(info("transaction", "privacy-minimal receipt (no transaction hash): proves the server says it served this payer, not that funds moved"));
   }
   let authz: ArtifactResult["authorization"] = { status: "unproven", host, evidence: [] };
-  if (s.ok && s.signer) authz = await authorize(s.signer, host, { trustedPayTo: o.trustedPayTo, agent: o.agent, kidDomain: s.kidDomain, kidMethod: s.kidMethod }, ctx);
+  if (s.ok && s.signer) authz = await authorize(s.signer, host, { trustedPayTo: o.trustedPayTo, agent: o.agent, kidDomain: s.kidDomain, kidMethod: s.kidMethod, signedAt: Number.isFinite(Number(p.issuedAt)) && p.issuedAt !== undefined ? Number(p.issuedAt) : undefined }, ctx);
   const verdict = verdictOf(s.ok, checks, authz);
   return { kind: "receipt", format: String(art.format), verdict, signature_valid: s.ok, signer: s.ident, payload: s.payload, checks, authorization: authz, summary: SUMMARY[verdict] };
 }

@@ -19,7 +19,7 @@ export function parseJws(compact: string): ParsedJws {
 }
 
 export type KeyKind = "secp256k1" | "ed25519" | "p256";
-export interface PubKey { kind: KeyKind; bytes: Uint8Array /* secp256k1/p256: uncompressed 65B; ed25519: 32B */; evmAddress?: string }
+export interface PubKey { kind: KeyKind; bytes: Uint8Array /* secp256k1/p256: uncompressed 65B; ed25519: 32B */; evmAddress?: string; /** W3C security-vocab `revoked` dateTime from the DID document, if any */ revoked?: string }
 
 export function pubKeyFromJwk(jwk: Jwk): PubKey {
   if (jwk.kty === "OKP" && jwk.crv === "Ed25519" && typeof jwk.x === "string") {

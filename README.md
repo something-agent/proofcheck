@@ -11,6 +11,7 @@ A valid signature only proves *someone* holds a key. The spec itself warns that 
 | Evidence | Strength | Meaning |
 |---|---|---|
 | `did_web` | strong | key is in `https://<host>/.well-known/did.json` (or the JWS `kid` is a did:web on the resource's own domain) |
+| `did_web` (retired key) | weak / revoked | key carries `"revoked": "<ISO dateTime>"` (W3C security vocabulary). Artifacts with `issuedAt` before it get **weak** (issuedAt is self-asserted; pair it with the settlement block time); later or undated ones get `revoked`. Keep retired keys in the same did.json, no separate history document needed. |
 | `dns_controllers` | strong | key is in a `_controllers.<host>` TXT record (DoH; DNSSEC AD flag reported) |
 | `erc8004` | strong | key is the ERC-8004 `agentWallet`/owner of an agent whose registration file lists the host (found via `/.well-known/agent-registration.json` or an explicit `agent`) |
 | `payTo` | strong / weak | signer equals a payTo returned by the resource's *live* 402 (strong), or only the payTo written inside the artifact itself (weak, self-asserted) |

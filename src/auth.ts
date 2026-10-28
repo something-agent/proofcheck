@@ -12,7 +12,7 @@ import { PubKey, pubKeyFromJwk, pubKeyFromMultibase } from "./jws";
 import { dec, b64urlDecode } from "./bytes";
 
 export interface Signer { evm?: string; pub?: PubKey }
-export interface Evidence { method: string; result: "authorized" | "not_found" | "error" | "skipped"; strength?: "strong" | "weak"; detail: string; source?: string }
+export interface Evidence { method: string; result: "authorized" | "not_found" | "revoked" | "error" | "skipped"; strength?: "strong" | "weak"; detail: string; source?: string }
 export interface AuthCtx { fetchImpl?: typeof fetch; network?: boolean }
 
 export function sameKey(candidate: PubKey, s: Signer): boolean {
@@ -23,9 +23,24 @@ export function sameKey(candidate: PubKey, s: Signer): boolean {
 
 const err = (method: string, e: unknown, source?: string): Evidence => ({ method, result: "error", detail: String((e as Error)?.message ?? e).slice(0, 200), source });
 
+/**
+ * A DID key marked `revoked` (W3C security vocabulary, xsd:dateTime) binds only artifacts signed before that time.
+ * The artifact's own issuedAt is written by the key holder, so a leaked retired key can backdate it:
+ * pre-revocation artifacts get WEAK evidence (needs an independent time: settlement block time, your own receipt log).
+ */
+export function applyRevocation(e: Evidence, revoked: string | undefined, signedAt?: number): Evidence {
+  if (revoked === undefined || e.result !== "authorized") return e;
+  const r = Date.parse(revoked);
+  if (!Number.isFinite(r)) return { ...e, result: "revoked", strength: undefined, detail: `key is marked revoked ('${revoked.slice(0, 40)}', not a parseable dateTime), so it binds nothing` };
+  const rs = Math.floor(r / 1000), iso = new Date(r).toISOString();
+  if (signedAt !== undefined && Number.isFinite(signedAt) && signedAt < rs)
+    return { ...e, strength: "weak", detail: `${e.detail}; key revoked at ${iso}, and the artifact's issuedAt (${new Date(signedAt * 1000).toISOString()}) is earlier. issuedAt is self-asserted by the key holder (a leaked retired key can backdate), so treat this as binding only with an independent time such as the settlement block time or your own receipt log.` };
+  return { ...e, result: "revoked", strength: undefined, detail: `key revoked at ${iso}; ${signedAt !== undefined && Number.isFinite(signedAt) ? `artifact issuedAt ${new Date(signedAt * 1000).toISOString()} is not earlier` : "artifact carries no issuedAt to compare"}, so the key does not bind it` };
+}
+
 export function describeSigner(s: Signer): string { return s.evm ?? (s.pub ? `${s.pub.kind}:${s.pub.bytes.length} bytes` : "unknown"); }
 
-export async function gatherEvidence(signer: Signer, host: string, o: { payTo?: string; trustedPayTo?: string[]; agent?: { chainId: number; agentId: string; registry?: string }; skipNetwork?: boolean }, ctx: AuthCtx): Promise<Evidence[]> {
+export async function gatherEvidence(signer: Signer, host: string, o: { payTo?: string; trustedPayTo?: string[]; agent?: { chainId: number; agentId: string; registry?: string }; skipNetwork?: boolean; signedAt?: number }, ctx: AuthCtx): Promise<Evidence[]> {
   const ev: Evidence[] = [];
 
   // 1. payTo
@@ -46,8 +61,11 @@ export async function gatherEvidence(signer: Signer, host: string, o: { payTo?: 
     try {
       const { doc, url } = await fetchDidWeb(did, f);
       const keys = (doc.verificationMethod ?? []).flatMap(keysFromVerificationMethod);
-      const hit = keys.some((k) => sameKey(k, signer));
-      return [{ method: "did_web", result: hit ? "authorized" : "not_found", strength: hit ? "strong" : undefined, detail: hit ? `key listed in ${did} verificationMethod (current state)` : `${keys.length} key(s) in ${did} document, none match the signer`, source: url } as Evidence];
+      const hitKeys = keys.filter((k) => sameKey(k, signer));
+      const live = hitKeys.find((k) => k.revoked === undefined);
+      const hit = hitKeys.length > 0;
+      const e: Evidence = { method: "did_web", result: hit ? "authorized" : "not_found", strength: hit ? "strong" : undefined, detail: hit ? `key listed in ${did} verificationMethod (current state)` : `${keys.length} key(s) in ${did} document, none match the signer`, source: url };
+      return [live || !hit ? e : applyRevocation(e, hitKeys[0].revoked, o.signedAt)];
     } catch (e) { return [{ ...err("did_web", e, didSafeUrl(host)), result: /HTTP 404|HTTP 403/.test(String((e as Error).message)) ? "not_found" : "error" } as Evidence]; }
   })());
 

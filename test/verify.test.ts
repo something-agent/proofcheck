@@ -76,6 +76,22 @@ describe("signer authorization evidence", () => {
     expect(ev(r, "did_web")).toMatchObject({ result: "authorized", strength: "strong" });
     expect(r.verdict).toBe("valid_authorized");
   });
+  it("did:web key marked revoked binds only artifacts issued before it, and only weakly (verticalmarketplace)", async () => {
+    const a = newAccount();
+    const revoked = new Date((NOW - 3600) * 1000).toISOString();
+    const { f } = stubFetch([(u) => (u.endsWith("/.well-known/did.json") ? json({ id: `did:web:${HOST}`, verificationMethod: [{ id: "#old", blockchainAccountId: `eip155:8453:${a.address.toLowerCase()}`, revoked }] }) : undefined)]);
+    const before = receiptPayload({ resourceUrl: `https://${HOST}/x`, issuedAt: NOW - 86400 });
+    const r1 = await verifyReceipt({ format: "eip712", payload: before, signature: await signReceipt(a, before) }, { maxAgeSeconds: 10 ** 6 }, ctx(f));
+    expect(ev(r1, "did_web")).toMatchObject({ result: "authorized", strength: "weak" });
+    expect(ev(r1, "did_web").detail).toMatch(/self-asserted/);
+    expect(r1.verdict).toBe("valid_signer_unproven"); expect(r1.authorization.status).toBe("weak_only");
+    const after = receiptPayload({ resourceUrl: `https://${HOST}/x`, issuedAt: NOW - 60 });
+    const r2 = await verifyReceipt({ format: "eip712", payload: after, signature: await signReceipt(a, after) }, {}, ctx(f));
+    expect(ev(r2, "did_web").result).toBe("revoked"); expect(r2.authorization.status).toBe("unproven");
+    const p = offerPayload();
+    const r3 = await verifyOffer({ format: "eip712", payload: p, signature: await signOffer(a, p) }, {}, ctx(f));
+    expect(ev(r3, "did_web").result).toBe("revoked");
+  });
   it("did:web document listing someone else is not_found", async () => {
     const a = newAccount(); const b = newAccount(); const p = offerPayload();
     const { f } = stubFetch([(u) => (u.endsWith("/did.json") ? json({ id: `did:web:${HOST}`, verificationMethod: [{ id: "#k", ethereumAddress: b.address }] }) : undefined)]);

@@ -26,6 +26,8 @@ export function keysFromVerificationMethod(vm: any): PubKey[] {
     if (m) keys.push({ kind: "secp256k1", bytes: new Uint8Array(0), evmAddress: toChecksumAddress(m[1]) });
   }
   if (typeof vm?.ethereumAddress === "string" && /^0x[0-9a-fA-F]{40}$/.test(vm.ethereumAddress)) keys.push({ kind: "secp256k1", bytes: new Uint8Array(0), evmAddress: toChecksumAddress(vm.ethereumAddress) });
+  // A retired key stays in the document with the W3C security-vocabulary `revoked` dateTime (verticalmarketplace's question).
+  if (vm && vm.revoked !== undefined) for (const k of keys) k.revoked = String(vm.revoked);
   return keys;
 }
 
